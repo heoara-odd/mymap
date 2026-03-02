@@ -1,34 +1,112 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<title>네이버 지도</title>
-
-<style>
-html, body { margin:0; padding:0; height:100%; }
-#map { width:100%; height:100%; }
-</style>
-
-<script src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpClientId=b80tmb668l"></script>
+    <meta charset="UTF-8">
+    <title>비즈니스 마스터 맵</title>
+   <script type="text/javascript" src="https://openapi.map.naver.com/openapi/v3/maps.js?ncpClientId=b80tmb668l&submodules=geocoder"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        #map { width: 100%; height: 100vh; }
+        .search-container { position: absolute; top: 10px; left: 10px; z-index: 100; background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
+        input { padding: 10px; width: 300px; border: 1px solid #ddd; border-radius: 4px; outline: none; }
+        .marker-label { background: white; padding: 2px 5px; border: 1px solid #666; font-size: 11px; font-weight: bold; border-radius: 3px; box-shadow: 1px 1px 2px rgba(0,0,0,0.2); }
+        .info-window { padding: 15px; min-width: 220px; line-height: 1.6; }
+        .status-tag { font-size: 11px; padding: 2px 5px; border-radius: 3px; color: white; margin-right: 5px; }
+        .btn-navi { display: block; text-align: center; margin-top: 10px; padding: 8px; background: #03C75A; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; }
+    </style>
 </head>
-
 <body>
 
-<div id="map"></div>
+    <div class="search-container">
+        <input type="text" id="searchInput" placeholder="업체명 검색" onkeyup="filterMarkers()">
+        <div id="resultCount" style="margin-top:5px; font-size:12px; color:#666;">데이터 로딩 중...</div>
+    </div>
+    
+    <div id="map"></div>
 
-<script>
-var map = new naver.maps.Map('map', {
-    center: new naver.maps.LatLng(37.5665, 126.9780), // 서울 시청
-    zoom: 12
-});
+    <script>
+        // 데이터 설정
+        const rawData = `
+(한일) 한일기전	전남 여수시 흥국사길 50 (중흥동 101)	010-2430-6636	정상
+(포에) 포에스엔지니어링	전남 여수시 여수산단로 579	010-2646-8277	정상
+(신화) 신화소방	전남 여수시 중흥3로 1-11 (중흥동 1769-7)	010-9410-3355	정상
+(건영) 건영전기	전남 여수시 여수산단2로 15 (주삼동 577-5)	010-2607-1462	정상
+(한솔) 한솔전기	부산시 사상구 낙동대로 1048번길 22	정보없음	정상
+        `;
 
-// 마커 하나 찍기
-var marker = new naver.maps.Marker({
-    position: new naver.maps.LatLng(37.5665, 126.9780),
-    map: map
-});
-</script>
+        const parsedCompanies = rawData.trim().split('\n').map(line => line.split('\t'));
 
+        // 지도 생성 (여수 중심)
+        var map = new naver.maps.Map('map', {
+            center: new naver.maps.LatLng(34.7604, 127.6622),
+            zoom: 11
+        });
+
+        var allMarkers = [];
+
+        // 주소를 좌표로 변환하여 마커 찍기
+        parsedCompanies.forEach(function(company) {
+            if (company.length < 2) return;
+
+            var name = company[0].trim();
+            var addr = company[1].trim();
+            var tel = (company[2] || "").trim();
+            var status = (company[3] || "").trim();
+
+            naver.maps.Service.geocode({ query: addr }, function(status_code, response) {
+                // 에러가 나더라도 지도가 멈추지 않게 처리
+                if (status_code !== naver.maps.Service.Status.OK || !response.v2.addresses[0]) {
+                    console.log(name + ": 주소 인식 실패");
+                    return;
+                }
+
+                var result = response.v2.addresses[0];
+                var point = new naver.maps.LatLng(result.y, result.x);
+                var shortName = name.split(' ').slice(0, 2).join(' ');
+                var markerColor = (status === "미수") ? "#FF4136" : "#0074D9";
+
+                var marker = new naver.maps.Marker({
+                    position: point,
+                    map: map,
+                    icon: {
+                        content: `<div style="text-align:center;"><div class="marker-label">${shortName}</div><div style="width:12px; height:12px; background:${markerColor}; border-radius:50%; margin:auto; border:2px solid white;"></div></div>`,
+                        anchor: new naver.maps.Point(15, 30)
+                    }
+                });
+
+                var naviUrl = `https://map.naver.com/v5/directions/-/-/${result.y},${result.x},${encodeURIComponent(name)}/-/road-route`;
+                var statusHtml = status ? `<span class="status-tag" style="background:${markerColor}">${status}</span>` : "";
+
+                var infowindow = new naver.maps.InfoWindow({
+                    content: `<div class="info-window"><div style="margin-bottom:5px;">${statusHtml}<strong>${name}</strong></div><div style="font-size:13px; color:#444;">📍 <a href="${naviUrl}" target="_blank" style="text-decoration:none; color:#444;">${addr}</a><br>📞 <a href="tel:${tel}" style="color:#007bff; font-weight:bold;">${tel}</a></div><a href="${naviUrl}" target="_blank" class="btn-navi">네이버 길찾기(네비)</a></div>`
+                });
+
+                marker.set('rawName', name);
+                allMarkers.push(marker);
+
+                naver.maps.Event.addListener(marker, "click", function() {
+                    if (infowindow.getMap()) { infowindow.close(); } 
+                    else { infowindow.open(map, marker); }
+                });
+                updateCount();
+            });
+        });
+
+        function filterMarkers() {
+            var input = document.getElementById('searchInput').value.toLowerCase();
+            var searchTerms = input.split('.').map(t => t.trim()).filter(t => t !== "");
+            allMarkers.forEach(marker => {
+                var name = marker.get('rawName').toLowerCase();
+                var isMatch = (searchTerms.length === 0) || searchTerms.some(term => name.includes(term));
+                marker.setMap(isMatch ? map : null);
+            });
+            updateCount();
+        }
+
+        function updateCount() {
+            var visibleCount = allMarkers.filter(m => m.getMap() !== null).length;
+            document.getElementById('resultCount').innerText = `검색 결과: ${visibleCount}건 / 전체: ${parsedCompanies.length}건`;
+        }
+    </script>
 </body>
 </html>
-
